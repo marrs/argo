@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mocha</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  </head>
+  <body>
+    <nav>
+      <a href="test.html">Tests</a>
+    </nav>
+    <div id="example">
+    </div>
+    <script src="argo.js"></script>
+    <script>
+      function App(fire) {
+        return { render };
+        function render(name) {
+          return name? [
+            'p', 'Hello, ', ['em', name]
+          ] : [
+            [
+              'input', {
+                type: 'text',
+                name: 'user_name',
+                placeholder: 'Please enter your name',
+              },
+            ], [
+              'button', {
+                click: function(evt) {
+                  fire('update', evt.target.previousSibling.value);
+                }
+              }, 'Update',
+            ]
+          ];
+        }
+      }
+      var ui = argo(App, document.getElementById('example'));
+      ui.on('update', (name) => ui.render(name))
+      ui.fire('update');
+    </script>
+  </body>
+</html>
