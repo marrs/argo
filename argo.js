@@ -1,3 +1,6 @@
+function type(x) {
+    return Object.prototype.toString.call(x);
+}
 function html(ml) {
     if (!Array.isArray(ml)) {
         throw new Error("jsonML must be an array.")
@@ -21,13 +24,39 @@ function html(ml) {
     } else if (typeof first === 'string') {
         tag = '<' + first;
     } else if (typeof first === 'function') {
-        console.log("TODO: handle components");
+        target.push(html(first(second)));
+        second = null;
+        if (rest.length) {
+            throw new Error("Too many args", first);
+        }
     } else {
         throw new Error("Illegal element in first position");
     }
 
-    if (Object.prototype.toString.call(second) === '[object Object]') {
-        console.log("TODO: Handle attributes");
+    if (type(second) === '[object Object]') {
+        Object.keys(second).map((ky) => {
+            var vl = second[ky];
+            switch(type(vl)) {
+                case '[object String]': {
+                    attr = ky + '="' + vl + '"';
+                } break;
+                case '[object Boolean]': {
+                    if (vl) {
+                        attr = ky + '="' + ky + '"';
+                    }
+                } break;
+                case '[object Object]': {
+                    if ('style' === ky) {
+                        attr = ky + '="' + Object.keys(vl).map((ky) => ky + ':' + vl[ky]).join(';') + '"';
+                    }
+                }
+            }
+            return ky + '=' + '"';
+        });
+        if (attr) {
+            tag += ' ' + attr + '>';
+            target.push(tag);
+        }
     } else {
         tag && target.push(tag += '>');
         if (Array.isArray(second)) {
@@ -47,7 +76,9 @@ function html(ml) {
         }
     }
     
-    if (second && typeof first === 'string') {
+    if (second !== undefined
+    && second !== null
+    && typeof first === 'string') {
         target.push('</' + first + '>');
     }
     return target.join('');
