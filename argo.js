@@ -1,6 +1,7 @@
 function type(x) {
     return Object.prototype.toString.call(x);
 }
+
 function html(ml) {
     if (!Array.isArray(ml)) {
         throw new Error("jsonML must be an array.")
@@ -53,10 +54,8 @@ function html(ml) {
             }
             return ky + '=' + '"';
         });
-        if (attr) {
-            tag += ' ' + attr + '>';
-            target.push(tag);
-        }
+        tag += attr? ' ' + attr + '>' : '>';
+        target.push(tag);
     } else {
         tag && target.push(tag += '>');
         if (Array.isArray(second)) {
@@ -76,8 +75,10 @@ function html(ml) {
         }
     }
     
-    if (second !== undefined
+    if (rest.length
+    || second !== undefined
     && second !== null
+    && type(second) !== '[object Object]'
     && typeof first === 'string') {
         target.push('</' + first + '>');
     }
@@ -87,5 +88,7 @@ function html(ml) {
 var argo = {
     html,
 }
+
+argo.html = html;
 
 window.argo = argo;
