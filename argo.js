@@ -8,7 +8,7 @@ function ml_to_nodes(ml) {
     }
 
     if (!ml.length) {
-        return "";
+        return [];
     }
 
     var nodes = [];
@@ -29,7 +29,7 @@ function ml_to_nodes(ml) {
 
     switch (type(first)) {
         case '[object Array]': {
-            nodes = nodes.concat(ml_to_nodes(first));
+            nodes = ml_to_nodes(first);
         } break;
         case '[object String]': {
             var el = document.createElement(first);
@@ -40,7 +40,17 @@ function ml_to_nodes(ml) {
 
         } break;
         case '[object Function]': {
-            nodes = ml_to_nodes(first(second));
+            var component = first(fire);
+            if (type(component.render) !== '[object Function]') {
+                throw new Error("Render function not provided.");
+            }
+            nodes = ml_to_nodes(first.render(second));
+        } break;
+        case '[object Object]': {
+            if (type(first.render) !== '[object Function]') {
+                throw new Error("Render function not provided.");
+            }
+            nodes = ml_to_nodes(first.render(second));
             if (rest.length) {
                 throw new Error("Too many args for component", first);
             }
@@ -63,7 +73,11 @@ function ml_to_nodes(ml) {
             switch (type(item)) {
                 case '[object Array]': {
                     ml_to_nodes(item).forEach(node => {
-                        nodes.push(node);
+                        if (type(first) === '[object Array]') {
+                            nodes.push(node);
+                        } else {
+                            nodes[0].append(node);
+                        }
                     });
                 } break;
                 case '[object String]':
@@ -77,6 +91,7 @@ function ml_to_nodes(ml) {
             }
         });
     }
+    console.log('nodes', nodes);
     return nodes;
 }
 
@@ -110,6 +125,10 @@ function argo(Component, el) {
         },
         fire
     }
+}
+
+if (window.mocha) {
+    window.ml_to_nodes = ml_to_nodes;
 }
 
 window.argo = argo;

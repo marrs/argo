@@ -13,23 +13,44 @@
     </div>
     <script src="argo.js"></script>
     <script>
+      function Greet(fire) {
+        return { render };
+        function render(name) {
+          return [
+            [
+              'p', 'Hello, ', ['em', name]
+            ] , [
+              'button', {
+                click: function(evt) {
+                  fire('update', null);
+                },
+              },
+              'Reset',
+            ]
+          ]
+        }
+      }
+
       function App(fire) {
         return { render };
         function render(name) {
-          return name? [
-            'p', 'Hello, ', ['em', name]
-          ] : [
+          var input_state = name;
+          return name? [Greet, name] : [
             [
               'input', {
                 type: 'text',
                 name: 'user_name',
+                id: 'username',
                 placeholder: 'Please enter your name',
+                input: (evt) => {
+                  input_state = evt.target.value;
+                },
               },
             ], [
               'button', {
                 click: function(evt) {
-                  fire('update', evt.target.previousSibling.value);
-                }
+                  fire('update', input_state);
+                },
               }, 'Update',
             ]
           ];
