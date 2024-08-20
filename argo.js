@@ -2,7 +2,23 @@ function type(x) {
     return Object.prototype.toString.call(x);
 }
 
-function ml_to_nodes(ml) {
+function render_nodes(Component, props, fire) {
+    var component = Component(fire);
+    var ml = component.render(props);
+    return ml_to_nodes(ml, fire);
+}
+
+function process_attrs(node, attrs) {
+    Object.keys(attrs).forEach(ky => {
+        if (type(attrs[ky]) === '[object Function]') {
+            node.addEventListener(ky, attrs[ky]);
+        } else {
+            node.setAttribute(ky, attrs[ky]);
+        }
+    });
+}
+
+function ml_to_nodes(ml, fire) {
     if (!Array.isArray(ml)) {
         throw new Error("jsonML must be an array.")
     }
@@ -16,16 +32,6 @@ function ml_to_nodes(ml) {
     var first = ml[0];
     var second = ml[1];
     var rest = ml.slice(2);
-
-    function process_attrs(node, attrs) {
-        Object.keys(attrs).forEach(ky => {
-            if (type(attrs[ky]) === '[object Function]') {
-                node.addEventListener(ky, attrs[ky]);
-            } else {
-                node.setAttribute(ky, attrs[ky]);
-            }
-        });
-    }
 
     switch (type(first)) {
         case '[object Array]': {
@@ -44,16 +50,7 @@ function ml_to_nodes(ml) {
             if (type(component.render) !== '[object Function]') {
                 throw new Error("Render function not provided.");
             }
-            nodes = ml_to_nodes(first.render(second));
-        } break;
-        case '[object Object]': {
-            if (type(first.render) !== '[object Function]') {
-                throw new Error("Render function not provided.");
-            }
-            nodes = ml_to_nodes(first.render(second));
-            if (rest.length) {
-                throw new Error("Too many args for component", first);
-            }
+            nodes = ml_to_nodes(component.render(second));
         } return nodes;
         default: {
             throw new Error("Illegal element in first position");
@@ -72,7 +69,15 @@ function ml_to_nodes(ml) {
         rest.forEach((item, idx) => {
             switch (type(item)) {
                 case '[object Array]': {
-                    ml_to_nodes(item).forEach(node => {
+                    if (type(item[0]) === '[object Function]') {
+                        if (item.length > 2) {
+                            throw new Error("Too many args for component", first);
+                        }
+                        var _nodes = render_nodes(item[0], item[1], fire);
+                    } else {
+                        var _nodes = ml_to_nodes(item, fire);
+                    }
+                    _nodes.forEach(node => {
                         if (type(first) === '[object Array]') {
                             nodes.push(node);
                         } else {
@@ -91,7 +96,6 @@ function ml_to_nodes(ml) {
             }
         });
     }
-    console.log('nodes', nodes);
     return nodes;
 }
 
@@ -116,8 +120,7 @@ function argo(Component, el) {
                 el.removeChild(child);
             });
             children = undefined;
-            var jsonml = Component(fire).render(props);
-            el.append.apply(el, ml_to_nodes(jsonml));
+            el.append.apply(el, render_nodes(Component, props, fire));
         },
         on(evt, handler) {
             var handlers = traps[evt] = traps[evt] || []
