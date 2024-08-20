@@ -23,7 +23,13 @@ function process_attrs(node, attrs) {
         if (type(attrs[ky]) === '[object Function]') {
             node.addEventListener(ky.slice(2).toLowerCase(), attrs[ky]);
         } else {
-            node.setAttribute(ky, attrs[ky]);
+            if (type(attrs[ky]) === '[object Boolean]') {
+                if(true === attrs[ky]) {
+                    node.setAttribute(ky, ky);
+                }
+            } else {
+                node.setAttribute(ky, attrs[ky]);
+            }
         }
     });
 }
