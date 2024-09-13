@@ -128,6 +128,7 @@ function ml_to_nodes(ml, fire) {
 
 function argo(Component, el) {
     var traps = {};
+    var is_rendering = false;
 
     function fire(evt, payload) {
         var handlers = traps[evt];
@@ -142,6 +143,10 @@ function argo(Component, el) {
 
     return {
         render(props) {
+            if (is_rendering) {
+                throw new Error("Argo: Already rendering. Did you fire a render event while rendering a component?");
+            }
+            is_rendering = true;
             var children = Array.prototype.slice.call(el.children);
             var { nodes, post_render } = render_nodes(Component, props, fire)
             children.forEach(child => {
@@ -151,6 +156,7 @@ function argo(Component, el) {
             post_render.forEach(hook => {
                 hook[0](hook[1]);
             })
+            is_rendering = false;
         },
         on(evt, handler) {
             var handlers = traps[evt] = traps[evt] || []
