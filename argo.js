@@ -114,6 +114,9 @@ function ml_to_nodes(ml, fire) {
                 case '[object Number]': {
                     nodes[0].append(rest[idx].toString());
                 } break;
+                case '[object Undefined]':
+                case '[object Null]':
+                    break;
                 default: {
                     throw new Error("Illegal type in position " + (nodes.length + idx));
                 }
