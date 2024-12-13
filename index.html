@@ -9,56 +9,83 @@
     <nav>
       <a href="test.html">Tests</a>
     </nav>
-    <div id="example">
-    </div>
-    <script src="argo.js"></script>
-    <script>
-      function Greet(fire) {
-        return { render };
-        function render(name) {
-          return [
-            [
-              'p', 'Hello, ', ['em', name]
-            ] , [
+    <h1>Welcome to Argo</h1>
+    <p>Argo is a lightweight DOM rendering engine with an emphasis on performance.</p>
+    <div id="example"></div>
+    <script type="module" src="reactor.js"></script>
+    <script type="module" src="argo.js"></script>
+    <script type="module">
+      import reactor from './reactor.js';
+      import argo from './argo.js';
+      function Greet($) {
+        return [
+          [
+            'p',
+            'Hello, ',
+            ['em', $.value('name', 'stranger')],
+            'Pleased to meet you.'
+          ] ,
+          $.match({
+            name: [
               'button', {
                 click: function(evt) {
-                  fire('update', null);
+                  reactor.fire('update', {name: undefined});
                 },
               },
               'Reset',
-            ]
-          ]
-        }
+            ]}, [])
+        ];
       }
 
-      function App(fire) {
-        return { render };
-        function render(name) {
-          var input_state = name;
-          return name? [Greet, name] : [
-            [
-              'input', {
-                type: 'text',
-                name: 'user_name',
-                id: 'username',
-                placeholder: 'Please enter your name',
-                input: (evt) => {
-                  input_state = evt.target.value;
-                },
+      function Greeter($) {
+        var input_state = $.get('name');
+        return $.match({
+          name: [Greet],
+        }, [ [
+            'input', {
+              type: 'text',
+              name: 'user_name',
+              id: 'username',
+              placeholder: 'Please enter your name',
+              input: (evt) => {
+                input_state = evt.target.value;
               },
-            ], [
-              'button', {
-                click: function(evt) {
-                  fire('update', input_state);
-                },
-              }, 'Update',
-            ]
-          ];
-        }
+            },
+          ], [
+            'button', {
+              click: function(evt) {
+                reactor.fire('update', {
+                  name: 'David',
+                });
+              },
+            }, 'Update',
+          ]
+        ]);
       }
-      var ui = argo(App, document.getElementById('example'));
-      ui.on('update', (name) => ui.render(name))
-      ui.fire('update');
+
+      function DemoApp($) {
+        return [
+            ['p', 'Below are some demos. Select one to try it out'],
+            ['ol', [
+                ['Simple Input Handler'].map((name, idx) => ['li',
+                    ['button', {
+                        click: function(evt) {
+                            reactor.fire('update', { demo: idx });
+                        }
+                    }, name]
+                ]),
+            ]],
+            $.match('demo', {
+                0: [Greeter, 'demo.0'],
+            }, [])
+        ];
+      }
+
+      var ui = argo(Greeter, document.getElementById('example'));
+      reactor.on('update', (delta) => ui.update(delta))
+      ui.init({
+        name: undefined,
+      });
     </script>
   </body>
 </html>
