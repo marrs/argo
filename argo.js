@@ -97,8 +97,7 @@ function Render_Context(args) {
                 if (!match) {
                     match = binding;
                 }
-                result = render_ml(match.ml, this, match);
-                match.is_rendered = true;
+                result = match.render(this);
                 this.context.pop(ctx);
                 return result;
             };
@@ -150,7 +149,7 @@ Object.assign(Render_Context.prototype, {
         var bindings = this.provide_bindings(prop);
         // Multiple components can bind to the same state addr.
         bindings.$bindings ??= {};
-        bindings.$bindings[this.component_id] = {
+        bindings.$bindings[this.component_id] = new Binding({
             component: this.component,  // TODO: Delete me!
             component_id: this.component_id,  // TODO: Delete me!
             context: this.context,
@@ -158,23 +157,74 @@ Object.assign(Render_Context.prototype, {
             ml,
             parent_node: this.dom_node_stack.at(-1),
             is_rendered: false,
-        };
+        });
         return bindings.$bindings[this.component_id];
     },
 });
 
+function Binding(props) {
+    Object.assign(this, {
+        nodes: [],
+        is_rendered: false,
+        is_attached: false,
+    }, props);
+
+    return this;
+}
+
+Object.assign(Binding.prototype, {
+    attach_nodes: function() {
+        if (!this.is_rendered) {
+            console.warn("Trying to attach nodes before they are rendered.");
+            return this;
+        }
+
+        if (this.is_attached) {
+            console.warn("Nodes already attached.");
+            return this;
+        }
+
+        this.nodes.forEach(node => {
+            this.parent_node.appendChild(node);
+        });
+        this.is_attached = true;
+
+        return this;
+    },
+
+    detach_nodes: function() {
+        if (!this.is_attached) {
+            console.warn("Nodes already detached.");
+            return this;
+        }
+
+        this.nodes.forEach(node => {
+            if (node.parentNode !== this.parent_node) {
+                console.error(`Expected node ${node} to be attached to ${this.parent_node}.`);
+            }
+            this.parent_node.removeChild(node);
+        });
+        this.is_attached = false;
+
+        return this;
+    },
+
+    render: function(context) {
+        var result = render_ml(this.ml, context, this);
+        this.is_rendered = true;
+        this.is_attached = true;
+        return result;
+    }
+});
+
+
 function dom_detach_alt_nodes(context, ky) {
     // Remove any nodes from DOM that don't belong to ky.
-    Object.keys(context).filter(x => x !== ky).forEach(_ky => {
-        var $bindings = context[_ky].$bindings;
-        console.log('bindings to remove for ky', _ky, $bindings);
-        for (var prop in $bindings) {
-            for (var node of $bindings[prop].nodes) {
-                if (node.parentNode) {
-                    node.parentNode.removeChild(node);
-                }
-            }
-        }
+    Object.keys(context).filter(x => x !== ky).forEach(alt_ky => {
+        var $bindings = context[alt_ky].$bindings;
+        Object.values($bindings).forEach(binding => {
+            binding.detach_nodes();
+        });
     });
 }
 
@@ -276,7 +326,6 @@ function provide_branch(tree, path) {
 // under a given binding.
 
 function render_ml(ml, $, required_binding) {
-    console.log('rendering ml', ml, required_binding);
 
     // When a matcher is returned at this level, it means the developer
     // has provided a number of rendering options for sub-components based
@@ -334,7 +383,7 @@ function render_ml(ml, $, required_binding) {
 
     switch (type(first)) {
       case 'Array': {
-          console.log('omg', ml);
+          console.log('ml array', ml);
           /*
           ml.forEach(el => {
               var result = render_ml(el, $, required_binding);
@@ -594,11 +643,12 @@ function argo(root_component, root_element) {
                             // - Modify node if it is already rendered
                             console.log('nodes to update', binding.nodes);
                         } else if (binding.is_rendered) {
-                            // TODO: Reattach to parent_node and update bindings.
+                            binding.attach_nodes();
+                            // TODO: Update bindings.
                         } else {
                             render_context.component_id = binding.component_id;
                             console.log('updating binding', binding, 'against context', render_context);
-                            var { post_render } = render_ml(binding.ml, render_context, binding);
+                            var { post_render } = binding.render(render_context);
                             // TODO: Handle post_render
                         }
                     });
@@ -607,12 +657,10 @@ function argo(root_component, root_element) {
                     dom_detach_alt_nodes(cxt_bindings, null);
                     Object.values(cxt_bindings.null.$bindings).forEach(binding => {
                         if (binding.is_rendered) {
-                            binding.nodes.forEach(node => {
-                                binding.parent_node.appendChild(node);
-                            });
+                            binding.attach_nodes();
                         } else {
                             render_context.component_id = binding.component_id;
-                            var { post_render } = render_ml(binding.ml, render_context, binding);
+                            var { post_render } = binding.render(render_context);
                             // TODO: Handle post_render
                         }
                     });
