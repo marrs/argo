@@ -1,3 +1,10 @@
+// NOTE:
+// - What is currently referred to as a component may be better
+//   described as a view context, as its sole purpose is to change
+//   the context in which elements are rendered.  Here 'context'
+//   refers to which sub-tree of the viewmodel the component has
+//   access to.
+
 function type(x) {
     return Object.prototype.toString.call(x).slice(8, -1);
 }
@@ -28,6 +35,7 @@ function parent_addr(ky) {
   return ky.substring(0, ky.lastIndexOf('.'));
 }
 
+/*
 function can_matcher_return_ml(matcher) {
     for (var output of Object.values(matcher.argo_meta.options)) {
         if (Array.isArray(output)) {
@@ -41,6 +49,7 @@ function can_matcher_return_ml(matcher) {
     }
     return Array.isArray(matcher.argo_meta.dflt);
 }
+*/
 
 function Render_Context(args) {
     Object.assign(this, {
@@ -49,8 +58,8 @@ function Render_Context(args) {
         bindings: {},
         state: read_interface({}),
         delta: read_interface({}),
-        dom_node_stack: [],
-        parents: [],
+        ml_stack: new Stack(),
+        post_render: [],
     }, args);
     this.$ = {
         get: this.delta.get,
@@ -65,10 +74,10 @@ function Render_Context(args) {
             return embedder;
         },
         match: (x, y, z) => {
-            var ctx = '', map, dflt;
+            var prop_to_test = '', map, dflt;
             switch (type(x)) {
                 case 'String': {
-                    ctx = x;
+                    prop_to_test = x;
                     map = y[x];
                     dflt = z;
                 } break;
@@ -81,25 +90,44 @@ function Render_Context(args) {
                 }
             }
             var matcher = el => {
-                this.context.push(ctx);
-                var prop_addr, match, result, binding;
-                for (var prop in map) {
-                    binding = this.add_binding(prop, map[prop]);
-                    prop_addr = this.addr(ctx, prop);
-                    if (this.delta.exists(prop_addr)) {
-                        if (!this.state.exists(prop_addr)) {
-                            match = binding;
-                            break;
+                // Adds bindings for all possible branches and then returns the
+                // binding and prop that matched the current delta so that render_ml
+                // knows what to render and attach.
+
+                var prop_addr, matching_binding, matching_prop, result, binding;
+                if (prop_to_test) {
+                    // TODO: Matcher will match the prop to one of the cases provided in map.
+                    matching_prop = Object.keys(map).indexOf(prop_to_test);
+                    // TODO: Add bindings for all cases (inc. default).
+                    if (matching_prop > -1) {
+                        // TODO: Set matching_binding to matching binding.
+                    } else {
+                        // TODO: Set matching_binding to default binding.
+                    }
+                    // FIXME: Placeholder: Delete once implemented.
+                    matching_binding = this.add_binding('null', dflt);
+                } else {
+                    // Match on the existance of first available prop
+                    for (var prop in map) {
+                        binding = this.add_binding(prop, map[prop]);
+                        prop_addr = this.addr('', prop);
+                        if (this.delta.exists(prop_addr)) {
+                            if (!this.state.exists(prop_addr)) {
+                                if (matching_prop) {
+                                    console.warn(`Argo: Ignoring '${prop}'; already matched on '${matching_prop}'.`);
+                                } else {
+                                    matching_binding = binding;
+                                    matching_prop = prop;
+                                }
+                            }
                         }
                     }
+                    binding = this.add_binding('null', dflt);
+                    if (!matching_binding) {
+                        matching_binding = binding;
+                    }
                 }
-                binding = this.add_binding('null', dflt);
-                if (!match) {
-                    match = binding;
-                }
-                result = match.render(this);
-                this.context.pop(ctx);
-                return result;
+                return matching_binding;
             };
             matcher.argo_name = 'matcher';
             matcher.argo_meta = {
@@ -113,6 +141,12 @@ function Render_Context(args) {
 
 Object.assign(Render_Context.prototype, {
     addr: function() {
+        // Returns absolute address of provided prop(s) relative to current
+        // context.  E.g, if current context is 'foo.bar', addr('baz') will
+        // return 'foo.bar.baz'.
+        //
+        // Returns address of current context if no args are provided.
+
         if (arguments.length) {
             var args = Array.prototype.filter.call(arguments, x => x).join('.');
             var ctx = this.addr();
@@ -122,6 +156,59 @@ Object.assign(Render_Context.prototype, {
                 return part? acc + '.' + part : acc;
             }, '');
         }
+    },
+
+    push_ml_from_component: function(component, context='', parent_node) {
+        this.push({
+            expr: component(this.$),
+            context,
+            parent_node,
+        });
+        if (this.ml_stack.frame.context) {
+            this.context.push(context);
+        }
+        return this;
+    },
+
+    push_ml_from_binding: function(binding) {
+        this.push({
+            expr: binding.ml,
+            binding,
+            parent_node: binding.parent_node
+        });
+        return this;
+    },
+
+    push_ml: function(ml) {
+        this.push({ expr: ml });
+        return this;
+    },
+
+    push: function(obj) {
+        if (!obj.parent_node) {
+            if (!this.ml_stack.frame) {
+                throw new Error("A parent node must be provided for rendering");
+            }
+            obj.parent_node = this.ml_stack.frame.parent_node;
+        }
+        this.ml_stack.push(obj);
+        return this;
+    },
+
+    pop: function() {
+        var old_frame = this.ml_stack.pop();
+        if (old_frame) {
+
+            if (old_frame.context) {
+                this.context.pop();
+            }
+
+            if (old_frame.binding) {
+                old_frame.binding.is_rendered = true;
+                old_frame.binding.is_attached = true;
+            }
+        }
+        return old_frame;
     },
 
     bind_attr: function(node, ky, vl) {
@@ -136,9 +223,9 @@ Object.assign(Render_Context.prototype, {
         // TODO: Rewrite this.
         this.bindings[this.addr(ky)] = {
             node,
-            fn: refresh_content,
+            fn: append_text_node,
         }
-        refresh_content(node, ky, vl);
+        append_text_node(node, ky, vl);
     },
 
     provide_bindings: function(prop = '') {
@@ -152,28 +239,31 @@ Object.assign(Render_Context.prototype, {
         bindings.$bindings[this.component_id] = new Binding({
             component: this.component,  // TODO: Delete me!
             component_id: this.component_id,  // TODO: Delete me!
-            context: this.context,
+            context: this.context.slice(), // TODO: Consider refering to the delta part directly.
             nodes: [],
             ml,
-            parent_node: this.dom_node_stack.at(-1),
+            parent_node: this.ml_stack.frame.parent_node,
             is_rendered: false,
         });
         return bindings.$bindings[this.component_id];
     },
 });
 
-function Binding(props) {
+function Binding(args) {
     Object.assign(this, {
         nodes: [],
         is_rendered: false,
         is_attached: false,
-    }, props);
+        context: undefined,
+        ml: undefined,
+        parent_node: undefined,
+    }, args);
 
     return this;
 }
 
 Object.assign(Binding.prototype, {
-    attach_nodes: function() {
+    attach_rendered_nodes: function() {
         if (!this.is_rendered) {
             console.warn("Trying to attach nodes before they are rendered.");
             return this;
@@ -208,13 +298,6 @@ Object.assign(Binding.prototype, {
 
         return this;
     },
-
-    render: function(context) {
-        var result = render_ml(this.ml, context, this);
-        this.is_rendered = true;
-        this.is_attached = true;
-        return result;
-    }
 });
 
 
@@ -228,35 +311,6 @@ function dom_detach_alt_nodes(context, ky) {
     });
 }
 
-function render_component(component, $, required_binding) {
-    if ($.component) {
-        // XXX: This may not be required.  We can get these data from
-        // $.bindings.  All we need is $.context and $.component_id.
-        $.parents.push({
-            component: $.component,
-            component_id: $.component_id,
-            dom_node: $.parent_node,
-        });
-    }
-    $.component = component;
-    ++$.component_id
-    var ml = component($.$);
-    var { post_render } = render_ml(ml, $, required_binding);
-    if (type(component.postRender) === 'Function') {
-        post_render.push([component.postRender, $.dom_node_stack.at(-1)]);
-    }
-
-    // XXX: This may not be required. See above
-    if ($.parents.length) {
-        var parent = $.parents.pop();
-        $.component = parent.component;
-        $.parent_node = parent.dom_node;
-    }
-    return {
-        post_render,
-    };
-}
-
 function refresh_attr(node, ky, vl) {
     if (type(vl) === 'Boolean') {
         if(true === vl) {
@@ -267,7 +321,7 @@ function refresh_attr(node, ky, vl) {
     }
 }
 
-function refresh_content(el, vl) {
+function append_text_node(el, vl) {
     el.appendChild(document.createTextNode(vl));
 }
 
@@ -296,17 +350,6 @@ function is_named_fn(fn, name) {
     return 'Function' === type(fn) && name === fn.argo_name
 }
 
-function get_branch(tree, path) {
-    var result = tree;
-    path.split('.').forEach(x => {
-        if (!result[x]) {
-            throw new Error(`Object does not exist at address [${path}]`);
-        }
-        result = result[x];
-    });
-    return result;
-}
-
 function provide_branch(tree, path) {
     var result = tree;
     if (path) {
@@ -318,6 +361,26 @@ function provide_branch(tree, path) {
     return result;
 }
 
+function Stack() {
+    this.frame;
+
+    this.push = (x) => {
+        Stack.prototype.push.call(this, x);
+        this.frame = this.at(-1);
+        return this;
+    };
+
+    this.pop = () => {
+        var frame = Stack.prototype.pop.call(this);
+        this.frame = this.length? this.at(-1) : undefined;
+        return frame;
+    };
+
+    return this;
+}
+
+Stack.prototype = Object.create(Array.prototype);
+
 // Wherever $.match is called, we need to provide the engine
 // with the rendering options that the dev provided so that
 // they can be utilised later on during runtime.
@@ -325,112 +388,45 @@ function provide_branch(tree, path) {
 // This is done with the super_state and dependency chain properties
 // under a given binding.
 
-function render_ml(ml, $, required_binding) {
+function render_ml($) {
 
-    // When a matcher is returned at this level, it means the developer
-    // has provided a number of rendering options for sub-components based
-    // on the state of the component's context.
-    //
-    // One of these branches will be rendered on the first run.  Others may
-    // be rendered in the future, depending on how the state changes.
-    //
-    // We therefore bind all branching options now so that they can be called
-    // when they are required in the future.
+    var binding;
+    var counter = 0;
 
-    if (is_named_fn(ml, 'matcher')) {
-        return ml();
-    }
+    while ($.ml_stack.length) {
+        var ml_frame = $.ml_stack.frame;
+        var ml = ml_frame.expr;
 
-    if (!Array.isArray(ml)) {
-        throw new Error("jsonML must be an array.")
-    }
+        if (counter++ > 1000) {
+            debugger;
+        }
 
-    if (!ml.length) {
-        return {
-            post_render: [],
-        };
-    }
 
-    var post_render = [];
+        if (ml_frame.is_rendered) {
+            $.pop();
+            continue;
+        }
 
-    var is_ml_element_list = true;
-
-    for (var item of ml) {
-        if (is_named_fn(item, 'matcher')) {
-            if (!can_matcher_return_ml(item)) {
-                is_ml_element_list = false;
-                break;
+        // If `ml_frame.idx` is defined then we're iterating an array
+        // of either ml elements or their content, depending on whether
+        // `is_content` was defined on current stack frame.
+        if (is_defined(ml_frame.idx)) {
+            if (ml_frame.idx < ml.length) {
+                $.push({
+                    expr: ml[ml_frame.idx],
+                    is_content: ml_frame.is_content
+                });
+                ++ml_frame.idx;
+            } else {
+                $.pop();
             }
-        } else if (!Array.isArray(item)) {
-            is_ml_element_list = false;
-            break;
+            continue;
         }
-    }
 
-    if (is_ml_element_list) {
-        ml.forEach(el => {
-            var result = render_ml(el, $, required_binding);
-            post_render = post_render.concat(result.post_render);
-        });
-        return { post_render };
-    }
-
-    var first = ml[0];
-    var second = ml[1];
-    var rest = ml.slice(2);
-
-    var element;
-
-    switch (type(first)) {
-      case 'Array': {
-          console.log('ml array', ml);
-          /*
-          ml.forEach(el => {
-              var result = render_ml(el, $, required_binding);
-              post_render = post_render.concat(result.post_render);
-          });
-          */
-          //render_ml(first, $, required_binding);
-        } break;
-        case 'String': {
-            element = document.createElement(first);
-            $.dom_node_stack.at(-1).appendChild(element);
-            if (required_binding) {
-                required_binding.nodes.push(element);
-                // TODO: Delete? is this right?  We already have a parent_node by now?
-                //required_binding.parent_node = $.dom_node_stack.at(-1);
-            }
-            $.dom_node_stack.push(element);
-        } break;
-        case 'Function': {
-            // TODO: Also need to check for matcher.
-            // - In first position, matcher can return ml or a tag name.
-            //   If it returns ml, this is an array of els and should be
-            //   treated like above case 'Array'.
-            second && $.ascend(second);
-            var {post_render} = render_component(first, $, required_binding);
-        } return {
-            post_render
-        };
-        default: {
-            console.log(type(first), first);
-            throw new Error("Illegal element in first position");
-        }
-    }
-
-    if (second) {
-        if (type(second) === 'Object') {
-            process_attrs($.dom_node_stack.at(-1), second, $);
-        } else {
-            rest.unshift(second);
-        }
-    }
-
-    if (rest.length) {
-        rest.forEach((item, idx) => {
-            switch (type(item)) {
+        if (ml_frame.is_content) {
+            switch (type(ml)) {
                 case 'Function': {
-                    switch (item.name) {
+                    switch (ml.name) {
                         case 'embedder': {
                             // TODO
                             //$.bind_node(node);
@@ -441,39 +437,132 @@ function render_ml(ml, $, required_binding) {
                     }
                 } break;
                 case 'Array': {
-                    if (type(item[0]) === 'Function') {
-                        if (item.length > 2) {
+                    if (type(ml[0]) === 'Function') {
+                        if (ml.length > 2) {
                             throw new Error("Too many args for component", first);
                         }
                         // Alter context if it's proivded.
-                        if (item[1]) {
-                            $.ascend(item[1]);
+                        if (ml[1]) {
+                            $.context.push(ml[1]);
                         }
-                        var result = render_component(item[0], $);
-                        post_render = post_render.concat(result.post_render);
+                        $.push_ml_from_component(ml[0], ml[1]);
                     } else {
-                        var result = render_ml(item, $);
-                        post_render = post_render.concat(result.post_render);
+                        ml_frame.is_content = false;
                     }
+                    continue;
                 } break;
                 case 'String':
                 case 'Boolean':
                 case 'Number': {
-                    refresh_content($.dom_node_stack.at(-1), item.toString());
+                    append_text_node($.ml_stack.frame.parent_node, ml.toString());
                 } break;
                 case 'Undefined':
                 case 'Null':
                     break;
                 default: {
-                    throw new Error("Illegal type in position " + idx);
+                    throw new Error(`ml token of Illegal type (${type(ml)})`);
                 }
             }
-        });
+            $.pop();
+            continue;
+        }
+
+        // The top-level of an expression can be a matcher, so this has to be
+        // handled first.  We must create the bindings for all possible branches
+        // now, but we only render the expression that's required for current
+        // view model.
+    
+        if (is_named_fn(ml, 'matcher')) {
+            binding = ml();
+            ml = binding.ml;
+            if (is_named_fn(ml, 'matcher')) {
+                // TODO: Before we can support nested matchers,
+                // we need a stack for the parent predicates
+                // so that we can bind against the complete predicate
+                // when we finally bind a node.
+                throw new Error("Nested matchers are not yet supported");
+            } else if (!Array.isArray(ml)) {
+                throw new Error("jsonML must be an array.")
+            }
+            ml_frame.is_rendered = true;
+            $.push_ml_from_binding(binding);
+            continue;
+        }
+
+        // Beyond this point, ml must represent an element.
+        if (!Array.isArray(ml)) {
+            throw new Error("jsonML must represent an element.")
+        }
+
+        if (!ml.length) {
+            $.pop();
+            continue;
+        }
+
+        var first = ml[0];
+        var second = ml[1];
+        var rest = ml.slice(2);
+
+        var element;
+        var do_continue = false;
+
+        switch (type(first)) {
+            case 'Array': {
+                console.log('ml array', ml);
+                ml_frame.idx = 0;
+                continue;
+            } break;
+            case 'String': {
+                element = document.createElement(first);
+                $.ml_stack.frame.parent_node.appendChild(element);
+                $.ml_stack.frame.is_rendered = true;
+                if (ml_frame.binding) {
+                    // Attach node as soon as first element is rendered.
+                    // That way the user sees a progressive load in the browser.
+                    // The binding's `is_attached` and `is_rendered` flags won't be
+                    // set until the binding has been fully rendered and ml_frame is
+                    // popped from the stack.
+                    ml_frame.binding.nodes.push(element);
+                    ml_frame.binding.parent_node = $.ml_stack.frame.parent_node;
+                }
+            } break;
+            case 'Function': {
+                // TODO: Also need to check for matcher.
+                // - In first position, matcher can return ml or a tag name.
+                //   If it returns ml, this is an array of els and should be
+                //   treated like above case 'Array'.
+                if (rest.length) {
+                    throw new Error("Too many args for component", first);
+                }
+                $.ml_stack.frame.is_rendered = true;
+                $.push_ml_from_component(first, second);
+                continue;
+            };
+            default: {
+                console.log(type(first), first);
+                throw new Error("Illegal element in first position");
+            }
+        }
+
+        if (second) {
+            if (type(second) === 'Object') {
+                process_attrs(element, second, $);
+            } else {
+                rest.unshift(second);
+            }
+        }
+
+        if (rest.length) {
+            $.push({
+                expr: rest,
+                idx: 0,
+                is_content: true,
+                parent_node: element
+            });
+            continue;
+        }
+        $.pop();
     }
-    if (element) {
-        $.dom_node_stack.pop();
-    }
-    return { post_render };
 }
 
 function lookup(obj, addr) {
@@ -570,27 +659,16 @@ function argo(root_component, root_element) {
                 console.warn("Argo: Components already rendered.");
             }
 
-            // component_id is only set once on initialisation.  After that, it
-            // is incremented at the beginning of render_component.  The thinking
-            // is that this function is only ever called when the component is
-            // rendered, which should only happen once for the lifetime of the
-            // page, so assigning an ID on render seems like a safe bet.
-            //
-            // If this turns out not to be the case, we may have a problem with
-            // identifying which components map to their super_state.
-
             var render_context = new Render_Context({
                 state: read_interface({}),
                 delta: read_interface(props),
                 bindings,
                 component_id: 0,
-                dom_node_stack: [root_element],
             });
-            var { post_render } = render_component(root_component, render_context);
-            post_render.forEach(hook => {
-                // TODO:
-                hook[0](hook[1]);
-            })
+            
+            render_context.push_ml_from_component(root_component, '', root_element);
+            render_ml(render_context);
+
             is_rendering = false;
             state = props;
             console.group('initialised');
@@ -619,7 +697,6 @@ function argo(root_component, root_element) {
                 context,
                 component: root_component,
                 bindings,
-                dom_node_stack: [parent_node],
             });
 
             var cxt_bindings = render_context.provide_bindings('');
@@ -643,13 +720,13 @@ function argo(root_component, root_element) {
                             // - Modify node if it is already rendered
                             console.log('nodes to update', binding.nodes);
                         } else if (binding.is_rendered) {
-                            binding.attach_nodes();
+                            binding.attach_rendered_nodes();
                             // TODO: Update bindings.
                         } else {
                             render_context.component_id = binding.component_id;
                             console.log('updating binding', binding, 'against context', render_context);
-                            var { post_render } = binding.render(render_context);
-                            // TODO: Handle post_render
+                            render_context.push_ml_from_binding(binding);
+                            render_ml(render_context);
                         }
                     });
                     dom_detach_alt_nodes(cxt_bindings, ky);
@@ -657,11 +734,11 @@ function argo(root_component, root_element) {
                     dom_detach_alt_nodes(cxt_bindings, null);
                     Object.values(cxt_bindings.null.$bindings).forEach(binding => {
                         if (binding.is_rendered) {
-                            binding.attach_nodes();
+                            binding.attach_rendered_nodes();
                         } else {
                             render_context.component_id = binding.component_id;
-                            var { post_render } = binding.render(render_context);
-                            // TODO: Handle post_render
+                            render_context.push_ml_from_binding(binding);
+                            render_ml(render_context);
                         }
                     });
                 }
